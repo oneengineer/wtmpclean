@@ -43,8 +43,6 @@ val dtf = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss");
 
 def crt_time(path:String):DateTime = {
 
-  val exe = "/home/xchen/shared/sparkjar/crt.sh"
-  //val exe = "/home/semuser/scripts/crt.sh"
   try {
 
     val t = Seq(exe, path) !!
@@ -128,46 +126,13 @@ def change_access_time2(month:Int,day:Int,hour:Int,min:Int,path:String ):Unit = 
 case class AA(path:String,month:Int,day:Int,hour:Int,min:Int)
 
 val aas = Vector(
-  AA("/home/tianxiaochen01/data/rat.final",9,1,13,21),
-  AA("/home/tianxiaochen01/data/out.vector2",9,1,18,13),
-  AA("/home/tianxiaochen01/result2",5,29,18,55),
-  AA("/home/tianxiaochen01/rat_memo",6,8,10,8),
-  AA("/home/semuser/spark/conf/spark-env.sh",7,16,18,19),
-  AA("/home/semuser/code/ads_clustering/data/out.vector2",8,11,14,30)
 )
 
 val allu = Vector(
-  AA("/home/tianxiaochen01/pypi",6,4,10,8),
-  AA("/home/tianxiaochen01/mpi/myprogram/prototype.cpp",7,1,11,9),
-  AA("/home/tianxiaochen01/mpi/myprogram/verysimple.cpp",7,3,10,27),
-  AA("/home/tianxiaochen01/mpi/myprogram/lesson03_power_method.cpp",6,26,18,29),
-
-  AA("/home/semuser/spark-1.4.1/conf/spark-env.sh",7,16,18,38),
-  AA("/home/semuser/spark-1.4.1/sbin/spark-config.sh",7,17,17,29),
-
-  AA("/home/tianxiaochen01/mpi/myprogram/main.cpp",9,8,18,59),
-
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/SparkLR.scala",7,21,18,20),
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/SparkPageRank.scala",7,21,16,20),
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/LocalALS.scala",7,21,17,55),
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/SimpleSkewedGroupByTest.scala",7,21,18,1),
-
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/HdfsTest.scala",7,24,18,2),
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/SparkKMeans.scala",7,24,15,21),
-  AA("/home/semuser/spark-1.4.1/examples/src/main/scala/org/apache/spark/examples/LocalLR.scala",7,24,17,39)
-
 )
 
 //access
 val osa = Vector(
-  AA("/home/tianxiaochen01/data/rat.final",9,11,19,1),
-  AA("/home/tianxiaochen01/data/out.vector2",9,4,10,22),
-  AA("/home/tianxiaochen01/result2",6,20,15,39),
-  AA("/home/tianxiaochen01/rat_memo",6,17,9,54),
-  AA("/home/semuser/spark/conf/spark-env.sh",7,16,18,25),
-  AA("/home/semuser/code/recommendation/data/trilinosExample_cluster",8,21,18,24),
-  AA("/home/semuser/code/ads_clustering/data/out.vector2",8,20,19,30)
-
 )
 
 def batch_update_modify() = {
@@ -215,7 +180,7 @@ def writeToFile(str:String,fileName:String) = {
 def get_all() = {
   import com.github.nscala_time.time.Imports._
 
-  val paths = files("/home/tianxiaochen01") map (_.getAbsolutePath)
+  val paths = files("") map (_.getAbsolutePath)
   //val paths = files("/home/semuser") map (_.getAbsolutePath)
 
   val data = paths map { x => (
