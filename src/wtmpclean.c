@@ -82,6 +82,12 @@
 
 static char *progname;
 
+
+struct utp_s{
+	int line_num;
+	struct utmpx* utp;
+};
+
 static void die (const char *fmt, ...);
 static void dumprecord (struct utmpxlist *p, int what);
 static void userchk (const char *usr);
@@ -167,6 +173,79 @@ timetostr (const time_t time)
     return s;
 }
 
+
+struct utmpxlist * wtmpxdump2 (const char *wtmpfile, const char *user)
+{
+    struct utmpxlist *p, *curr = NULL, *next, *utmpxlist = NULL;
+    struct utmpx *utp;
+    char runlevel;
+    int down = 0;
+
+    if (access (wtmpfile, R_OK))
+        die ("cannot access the file: %s\n", strerror (errno));
+
+    UTMPXNAME (wtmpfile);
+    setutxent ();
+
+    while ((utp = getutxent ()))
+      {
+
+          switch (utp->ut_type)
+            {
+            default:
+                break;
+            case RUN_LVL:
+                runlevel = utp->ut_pid % 256;
+                if ((runlevel == '0') || (runlevel == '6'))
+                    down = 1;
+                break;
+            case BOOT_TIME:
+                down = 0;
+                break;
+            case USER_PROCESS:
+                /*
+                 * Just store the data if it is interesting enough.
+                 */
+                     if ((p = malloc (sizeof (struct utmpxlist))) == NULL)
+                          die ("out of memory: %s\n", strerror (errno));
+
+                      memcpy (&p->ut, utp, sizeof (struct utmpx));
+                      p->delta = 0;
+                      p->ltype = R_NONE;
+                      p->next = NULL;
+                      if (utmpxlist == NULL)
+                        {
+                            utmpxlist = curr = p;
+                            p->prev = NULL;
+                        }
+                      else
+                        {
+                            curr->next = p;
+                            p->prev = curr;
+                            curr = p;
+                        }
+                break;
+            case DEAD_PROCESS:
+                for (p = curr; p; p = p->prev)
+                  {
+                      if (p->ut.ut_type != USER_PROCESS || p->ltype != R_NONE)
+                          continue;
+                      if (strncmp
+                          (p->ut.ut_line, utp->ut_line, sizeof utp->ut_line))
+                          continue;
+
+                      p->eos = utp->ut_tv.tv_sec;
+                      p->delta = utp->ut_tv.tv_sec - p->ut.ut_tv.tv_sec;
+                      p->ltype = (down ? R_DOWN : R_NORMAL);
+                  }
+                break;
+            }
+      }
+
+    endutxent ();
+    return utmpxlist;
+}
+
 unsigned int
 wtmpedit (const char *wtmpfile, const char *user, const char *fake,
           const char *timepattern, unsigned int *cleanerr)
@@ -247,6 +326,213 @@ wtmpedit (const char *wtmpfile, const char *user, const char *fake,
         fprintf (stderr, "cannot preserve access and modification times");
 
     return cleanrec;
+}
+
+unsigned int rand_pid() {
+	return (rand() % 25051) + 2000 ;
+}
+
+unsigned int rand_usec(){
+	return (rand() % 667585) + 100899;
+}
+
+void memcpy_char(char* dst, char * src){
+	int n = strlen(src) + 1;
+	memcpy( dst,src,sizeof(char) * n );
+}
+
+struct utp_s* get_all_entries(const char *wtmpfile,int * counter){
+	struct utmpx *utp;
+	*counter = 0;
+	UTMPXNAME (wtmpfile);
+	setutxent ();
+	while ((utp = getutxent ())){
+		(*counter) = (*counter) +1;
+	}
+	endutxent ();
+	//read again
+	struct utp_s * list = malloc( (*counter+10) * sizeof ( struct utp_s )  );
+	UTMPXNAME (wtmpfile);
+	setutxent ();
+	int i=0;
+	while ((utp = getutxent ())){
+		list[i].line_num = i;
+		list[i].utp = malloc( sizeof (struct utmpx) );
+		memcpy(list[i].utp,utp,sizeof(struct utmpx));
+		//deep copy
+		//memcpy_char( list[i].utp->ut_line,utp->ut_line,UT_LINESIZE);
+		memcpy_char( list[i].utp->ut_user,utp->ut_user);
+		//memcpy_char( list[i].utp->ut_host,utp->ut_host,UT_HOSTSIZE);
+		i++;
+	}
+	
+
+	endutxent ();
+	printf("length: %d\n",*counter);
+	return list;
+}
+
+int cmp(const struct utp_s* a, const struct utp_s* b ) {
+	if ( a->utp->ut_tv.tv_sec == b->utp->ut_tv.tv_sec )
+		return a->line_num - b->line_num;
+	else return a->utp->ut_tv.tv_sec - b->utp->ut_tv.tv_sec;
+}
+
+void write_back(struct utp_s* list,int n){
+	qsort(list,n,sizeof (struct utp_s) ,cmp);
+	static struct utmpx *utp;
+	remove("./generated_wtmp");
+	FILE *f = fopen("./generated_wtmp","w");
+	fclose(f);
+	UTMPXNAME ("./generated_wtmp");
+	//UTMPXNAME ("./wtmp");
+	setutxent();
+	for (int i=0;i<n;i++){
+		//printf("write %d\n",i);
+		//printf("%d %s\n",list[i].line_num,list[i].utp -> ut_user);
+		//updwtmpx("./generated_wtmp",list[i].utp);
+        	pututxline ( list[i].utp );
+	}
+	endutxent();
+}
+
+void edit_entry(
+		const char *wtmpfile,int pid,unsigned int original_time,unsigned int new_time,
+		const char *host_name,const int ip,const int edit_dead){
+	
+	//find template
+	int n;
+	struct utp_s* list = get_all_entries(wtmpfile,&n);
+	struct utmpx* target = NULL,*temp;
+
+	for (int i=0;i<n;i++){
+		temp = list[i].utp;
+		int type_right = 0;
+		if ( edit_dead && DEAD_PROCESS == temp->ut_type ){
+			type_right = 1;
+		}
+		else if (!edit_dead) {
+			type_right = 1;
+		}
+
+		if (  pid == temp->ut_pid && original_time == temp->ut_tv.tv_sec && type_right ){
+			target = list[i].utp;
+			break;
+		}
+	}
+
+	if ( NULL == target){
+		printf("Cannot find target entry.\n");
+		exit (EXIT_FAILURE);
+	}
+	
+	if (host_name != NULL){
+		int len = strlen(host_name)+1;
+		memcpy(target->ut_host,host_name,len * sizeof (char));
+	}
+	if (ip!=0 && DEAD_PROCESS != temp->ut_type){
+		target->ut_addr_v6[0] = ip;
+	}
+
+	if (new_time !=0){
+		target->ut_tv.tv_sec = new_time;
+	}
+
+	write_back(list,n);
+}
+
+void add_entry(
+		const char *wtmpfile,const char *ut_line,unsigned int start_time,unsigned int end_time,
+		const char *user_name,const char *host_name,const int ip){
+	unsigned int start_time_u = rand_usec();
+	unsigned int end_time_u = rand_usec();
+	unsigned int pid = rand_pid();
+	
+	//find template
+	int n;
+	struct utp_s* list = get_all_entries(wtmpfile,&n);
+	struct utmpx* template;
+
+	for (int i=0;i<n;i++){
+		if (  0 == strcmp( user_name,list[i].utp->ut_user )  ){
+			template = list[i].utp;
+			break;
+		}
+	}
+	
+	struct utmpx utp,utp2;
+	memcpy(&utp ,template ,sizeof utp);
+	memcpy(&utp2 ,template ,sizeof utp);
+	
+	
+	utp.ut_tv.tv_sec = start_time;
+	utp.ut_tv.tv_usec = start_time_u;
+	if (ut_line != NULL){
+		int len = strlen(ut_line)+1;
+		memcpy(utp.ut_line,ut_line,len * sizeof (char));
+		memcpy(utp2.ut_line,ut_line,len * sizeof (char));
+	}
+	if (host_name != NULL){
+		int len = strlen(host_name)+1;
+		memcpy(utp.ut_host,host_name,len * sizeof (char));
+	}
+	if (ip!=0){
+		utp.ut_addr_v6[0] = ip;
+	}
+
+	utp2.ut_type = DEAD_PROCESS;
+	memset (utp2.ut_user, 0, sizeof utp2.ut_user);
+	memset (utp2.ut_id, 0, sizeof utp2.ut_id);
+	memset (utp2.ut_host, 0, sizeof utp2.ut_host);
+	memset (utp2.ut_addr_v6, 0, sizeof utp2.ut_addr_v6);
+	utp2.ut_tv.tv_sec = end_time;
+	utp2.ut_tv.tv_usec = end_time_u;
+	//---- add two new entries -----
+	list[n].line_num = n;
+	list[n].utp = &utp;
+	n++;
+	list[n].line_num = n;
+	list[n].utp = &utp2;
+	n++;
+	write_back(list,n);
+}
+
+void 
+wtmp_check (const char *wtmpfile)
+{
+    static struct utmpx *utp;
+    unsigned int cleanrec;
+    int rc;
+    struct stat sb;
+    struct utimbuf currtime;
+
+    if (access (wtmpfile, W_OK))
+        die ("cannot access the file: %s\n", strerror (errno));
+
+    if (stat (wtmpfile, &sb))
+        die ("cannot get file status: %s\n", strerror (errno));
+
+    UTMPXNAME (wtmpfile);
+
+    int counter = 0;
+    int lastt = 0;
+    setutxent ();
+      while ((utp = getutxent ()))
+      {
+		char *time_string;
+		time_string = timetostr(utp->ut_tv.tv_sec);
+		printf("%d\t%s\t%s\t%s\t%s\t%s\t%d\t%d\n",utp->ut_pid,utp->ut_line,utp->ut_id,utp->ut_user,utp->ut_host,time_string,utp->ut_tv.tv_sec,utp->ut_addr_v6[0]);
+		
+		//printf("%d,%d\n",lastt,utp->ut_tv.tv_sec - lastt);
+		//lastt = utp->ut_tv.tv_sec;
+		
+		counter++;
+		
+	      }
+	    endutxent ();
+
+	printf("overall total record:%d \n",counter);
+
 }
 
 void
@@ -488,20 +774,28 @@ main (int argc, char **argv)
 {
     char *wtmpfile = getenv (DEFAULT_WTMP) ? : DEFAULT_WTMP;
     char *user = NULL, *fake = NULL, *timepattern = ".*";;
+    char *host_name= NULL,*ut_line= NULL ;
+    int end_time = 0, start_time = 0;
     unsigned char dump = 0, rawdump = 0, numeric = 0;
 
     int opt_index = 0;
     unsigned int cleanrec, cleanerr;
+    int pid=0,ip_addr=0,edit_dead=0;
 
+    srand(time(NULL));
     setlocale (LC_ALL, "C");
 
     progname = argv[0];
     opterr = 0;
+    
+    int check= 0,mode_add=0,mode_edit=0;
 
     while (1)
       {
           static struct option long_options[] = {
 #if defined(HAVE_UTMPXNAME) || defined(HAVE_UTMPNAME)
+              {"add", no_argument, 0, 'A'},
+              {"edit", no_argument, 0, 'E'},
               {"file", required_argument, 0, 'f'},
 #endif
               {"list", no_argument, 0, 'l'},
@@ -509,18 +803,28 @@ main (int argc, char **argv)
               {"raw", no_argument, 0, 'r'},
               {"time", required_argument, 0, 't'},
               {"help", no_argument, 0, 'h'},
+              {"host", required_argument, 0, 'H'},
+              {"start", required_argument, 0, 's'},
+              {"end", required_argument, 0, 'e'},
+              {"check", required_argument, 0, 'c'},
+              {"pid", required_argument, 0, 'p'},
+              {"ip", required_argument, 0, 'i'},
+              {"dead", required_argument, 0, 'd'},
+              {"line", required_argument, 0, 'L'},
               {0, 0, 0, 0}
           };
           static const char *options =
 #if defined(HAVE_UTMPXNAME) || defined(HAVE_UTMPNAME)
               "f:"
 #endif
-              "lrnt:h";
+              "Aldrnt:s:Ee:chH:p:i:L:";
 
           int opt =
               getopt_long (argc, argv, options, long_options, &opt_index);
           if (opt == -1)
               break;
+	
+	  printf("opt: %c\n",opt);
 
           switch (opt)
             {
@@ -529,6 +833,21 @@ main (int argc, char **argv)
                 break;
             case 'f':
                 wtmpfile = optarg;
+                break;
+            case 'H':
+                host_name = optarg;
+                break;
+            case 's':
+                sscanf(optarg,"%d",&start_time);
+                break;
+            case 'L':
+                ut_line = optarg;
+                break;
+            case 'e':
+                sscanf(optarg,"%d",&end_time);
+                break;
+            case 'p':
+                sscanf(optarg,"%d",&pid);
                 break;
             case 'l':
                 if (rawdump)
@@ -547,11 +866,37 @@ main (int argc, char **argv)
             case 't':
                 timepattern = optarg;
                 break;
+            case 'c':
+		check= 1;
+                break;
+            case 'i':
+                sscanf(optarg,"%d",&ip_addr);
+                break;
+            case 'd':
+		edit_dead= 1;
+                break;
+            case 'A':
+		mode_add= 1;
+                break;            
+            case 'E':
+		mode_edit= 1;
+                break;
             }
-      }
+      }//end of while
+	
+    if (check){
+    	wtmp_check(wtmpfile);
+          exit (EXIT_SUCCESS);
+    }
+    else if (mode_edit){
+    	  edit_entry(wtmpfile,pid,start_time,end_time,host_name,ip_addr,edit_dead);
+          exit (EXIT_SUCCESS);
+    }
 
-    if (argc == optind + 1)
+
+    if (argc == optind + 1){
         user = argv[optind];
+	}
     else if (argc == optind + 2)
       {
           user = argv[optind];
@@ -573,7 +918,14 @@ main (int argc, char **argv)
           exit (EXIT_SUCCESS);
       }
 
-    userchk (user);
+    
+    if (mode_add){
+	printf( "u:%s  h:%s\n",user,host_name );//debug
+    	add_entry(wtmpfile,ut_line,start_time,end_time,user,host_name,ip_addr);
+          exit (EXIT_SUCCESS);
+    }
+
+     userchk (user);
     cleanrec = wtmpedit (wtmpfile, user, fake, timepattern, &cleanerr);
     if (cleanerr > 0)
       {
